@@ -12,7 +12,6 @@ import com.google.api.services.drive.DriveScopes;
 import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.FileList;
 import com.google.gson.Gson;
-
 import java.io.*;
 import java.util.*;
 
@@ -20,20 +19,24 @@ public class GoogleDriveRepository extends Repository {
 
     private Drive service; // Google drive's service
     private File usersFile;  // Users.json file
+    private File configFile; // config.txt file
     private File rootFolder; // Repository's root folder
-    
+    private Gson gson;
+
     static {
         RepositoryManager.setRepository(new GoogleDriveRepository());
     }
 
     @Override
-    void Init(String rootDirectory) {
-
+    boolean Init(String rootDirectory) {
+        boolean returnValue = false;
         try {
             service = getDriveService();
             users = new ArrayList<>();
             gson = new Gson();
             this.rootDirectory = rootDirectory;
+            currentDirectory = rootDirectory;
+            excludedExtensions = new HashSet<>();
 
             String folderName = rootDirectory.split("/")[rootDirectory.split("/").length - 1];
 
@@ -53,16 +56,19 @@ public class GoogleDriveRepository extends Repository {
                     .setQ("'" + rootFolder.getId() + "' in parents and mimeType='application/json' and name='Users.json'")
                     .execute();
 
-            if(result.getFiles().size() > 0)
+            if(result.getFiles().size() > 0) {
                 usersFile = result.getFiles().get(0);
-            else {
+                returnValue = false;
+            } else {
                 File fileMetadata = new File();
                 fileMetadata.setName("Users.json");
                 fileMetadata.setMimeType("application/json");
+                fileMetadata.setParents(Collections.singletonList(rootFolder.getId()));
 
-                service.files().create(fileMetadata)
-                        .setFields("id")
+                usersFile = service.files().create(fileMetadata)
+                        .setFields("id, parents")
                         .execute();
+                returnValue = true;
             }
 
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
@@ -77,25 +83,79 @@ public class GoogleDriveRepository extends Repository {
                 users.add(gson.fromJson(str, User.class));
             }
 
+            FileList results = service.files().list()
+                    .setQ("'" + rootFolder.getId() + "' in parents and mimeType='text/plain' and name='config.txt'")
+                    .execute();
+
+            if(results.getFiles().size() > 0) {
+                configFile = results.getFiles().get(0);
+            } else {
+                File fileMetadata = new File();
+                fileMetadata.setName("config.txt");
+                fileMetadata.setParents(Collections.singletonList(rootFolder.getId()));
+                configFile = service.files().create(fileMetadata)
+                        .setFields("id, parents")
+                        .execute();
+            }
+
+
         } catch (Exception e) {
             e.printStackTrace();
         }
+        return returnValue;
     }
 
     @Override
-    public void AddUser(String username, String password, Privilege privilege) {
+    public void ExcludeExtension(String s) {
+
+    }
+
+    @Override
+    public void SetMaxBytes(int i) {
+
+    }
+
+    @Override
+    public void SetMaxFoldersInDirectory(String s, int i) {
+
+    }
+
+    @Override
+    public long RepositorySize() {
+        return 0;
+    }
+
+    @Override
+    public void AddUser(String username, String password, String privilegeString) throws NoPrivilegeException, OnlyOneAdminUserCanExistException, UserAlreadyExistsException {
         if(hasPrivilegeError("AddUser")) {
-            // throws NoPrivilegeException
+            throw new NoPrivilegeException();
         }
+
+        Privilege privilege = null;
+
+        if(privilegeString.equals("spectator")) {
+            privilege = Privilege.SPECTATOR;
+        } else if(privilegeString.equals("moderator")) {
+            privilege = Privilege.MODERATOR;
+        } else if(privilegeString.equals("user")) {
+            privilege = Privilege.USER;
+        } else if(privilegeString.equals("admin")) {
+            privilege = Privilege.ADMIN;
+        }
+
 
         for (User u : users) {
             if (u.getUsername().equals(username)) {
-                // throws UserAlreadyExistsException
+                 throw new UserAlreadyExistsException();
             }
         }
 
         if(privilege == Privilege.ADMIN) {
-            // throws OnlyOneAdminUserCanExistException
+            throw new OnlyOneAdminUserCanExistException();
+        }
+
+        if(privilegeString.equals("adminPrivilege")) {
+            privilege = Privilege.ADMIN;
         }
 
         User user = new User(username, password, privilege);
@@ -129,7 +189,7 @@ public class GoogleDriveRepository extends Repository {
     void CreateDirectory(String dirName) {
         if(hasPrivilegeError("CreateDirectory")) {
             try {
-                throw new NoPrivilegeException("You have no privilege to create directory!");
+                throw new NoPrivilegeException();
             } catch (NoPrivilegeException e) {
                 return;
             }
@@ -142,7 +202,7 @@ public class GoogleDriveRepository extends Repository {
 
         try {
             service.files().create(fileMetadata)
-                    .setFields("id")
+                    .setFields("id, parents")
                     .execute();
         } catch (IOException e) {
             e.printStackTrace();
@@ -150,13 +210,22 @@ public class GoogleDriveRepository extends Repository {
     }
 
     @Override
-    int CreateFile(String s) {
-        return 0;
+    boolean createDirectoriesWithCommonParent(String s, String s1) {
+        return false;
     }
 
     @Override
-    int ListFiles() {
-        return 0;
+    void CreateFile(String s) {
+    }
+
+    @Override
+    void ListFiles() {
+
+    }
+
+    @Override
+    void parseDirs(String s) {
+
     }
 
     @Override
